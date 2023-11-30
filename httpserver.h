@@ -1,7 +1,7 @@
 #ifndef _HTTPSERVER__H__
 #define _HTTPSERVER__H__
 
-#define ROOTPATH "/home/ubuntu/httpserver/www"
+#define ROOTPATH "/home/ceary/webserver/www"
 #define SDWPATH "/sdw/"
 #define PORT 80
 
