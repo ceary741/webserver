@@ -24,55 +24,23 @@ char const *ReqMethod[] =
 	NULL
 };
 
+int deny_http = 1;
+
 int main(void)
 {
-	int sd;
-	SSL_CTX *ctx;
-
-	SSL_library_init();
-	ctx = InitServerCTX();
-	LoadCertificates(ctx, "mycert.pem", "mycert.pem");
-	
-	if(setsocket(&sd) < 0)
-	{
-		perror("setsocket()");
-		exit(1);
+	pthread_t pid_http, pid_https;
+	if(pthread_create(&pid_http, NULL, httpServer, NULL) != 0) {
+		perror("pthread_create()");
+		exit(-1);
+	}
+	if(pthread_create(&pid_https, NULL, httpsServer, NULL) != 0) {
+		perror("pthread_create()");
+		exit(-1);
 	}
 
-	struct sockaddr_in raddr;
-	socklen_t raddr_len = sizeof(raddr);
-	SSL *ssl;
-	
 	while(1)
-	{
-		int rvsd = accept(sd, (void *)&raddr, &raddr_len); 
-		if(rvsd < 0)
-		{
-			perror("accept()");
-			close(sd);
-			exit(1);
-		}
-
-		char ipstr[IPSTRSIZE];
-		inet_ntop(AF_INET, &raddr.sin_addr, ipstr, IPSTRSIZE);
-		printf("Client:%s:%d\n", ipstr, ntohs(raddr.sin_port));
-
-		ssl = SSL_new(ctx);
-		SSL_set_fd(ssl, rvsd);
-
-		//http(rvsd);
-		https(ssl);
-
-		SSL_free(ssl);
-		if(close(rvsd) < 0)
-		{
-			perror("close()");
-			close(sd);
-			exit(1);
-		}
-	}
-	close(sd);
-	exit(0);
+		pause();
+	return 0;
 }
 
 int https(SSL *ssl)
@@ -80,27 +48,27 @@ int https(SSL *ssl)
 	Mesg *mesg = malloc(sizeof(Mesg));
 	mesg->para[0] = NULL;
 
-	if(httpsread(ssl, mesg) < 0)
+	if(httpsRead(ssl, mesg) < 0)
 	{
 		fprintf(stderr, "There is a error request\n");
-		freemesg(mesg);
+		freeMesg(mesg);
 		return -1;
 	}
 
-	if(httpssend(ssl, mesg) < 0)
+	if(httpsSend(ssl, mesg) < 0)
 	{
 		fprintf(stderr, "There is an error when send\n");
-		freemesg(mesg);
+		freeMesg(mesg);
 		return -1;
 	}
-	freemesg(mesg);
+	freeMesg(mesg);
 	return 0;
 }
 
-void freemesg(Mesg *mesg)
+void freeMesg(Mesg *mesg)
 {
 	int i;
-	for(i = 1; i < PARANUM; i++)
+	for(i = 0; i < PARANUM; i++)
 	{
 		if(mesg->para[i] == NULL)
 			break;
@@ -111,7 +79,7 @@ void freemesg(Mesg *mesg)
 	return;
 }
 
-int httpsread(SSL *ssl, Mesg *mesg)
+int httpsRead(SSL *ssl, Mesg *mesg)
 {
 	char buf[BUFSIZE];
 	int bytes;
@@ -120,15 +88,14 @@ int httpsread(SSL *ssl, Mesg *mesg)
 		ERR_print_errors_fp(stderr);
 		return -1;
 	}
-	ShowCerts(ssl);
+	showCerts(ssl);
 	bytes = SSL_read(ssl, buf, sizeof(buf));
 	if(bytes == BUFSIZE) {
 		fprintf(stderr, "GET is too long!\n");
 		return -1;
 	}
 	buf[bytes] = '\0';
-	char *path = mesg -> path;
-	strcpy(path, ROOTPATH);
+	strcpy(mesg->path, ROOTPATH);
 
 	char *line = malloc(BUFSIZE);
 	char *line_start = buf;
@@ -136,9 +103,6 @@ int httpsread(SSL *ssl, Mesg *mesg)
 	int cnt = 0;
 	while(1)
 	{
-		/*todo
-		  copy each line to line
-		  */
 		line_end = index(line_start, '\n');
 		strncpy(line, line_start, line_end-line_start+1);
 		line[line_end-line_start+1] = '\0';
@@ -148,26 +112,7 @@ int httpsread(SSL *ssl, Mesg *mesg)
 
 		if(cnt == 0)
 		{
-			int rightmethod = 0;
-			for(int i = 0; ReqMethod[i] != NULL; i++)
-			{
-				fputs(ReqMethod[i],stdout);
-				if(strncmp(line, ReqMethod[i], strlen(ReqMethod[i])) == 0)
-				{
-					mesg -> statu = i;
-					char* path_start = index(line, ' ')+1;
-					char* path_end = rindex(line, ' ');
-					strncat(path, path_start, path_end-path_start);
-					//if(strncmp(start, SDWPATH, 5) == 0)
-					//	mesg -> isSdw = 1;
-					rightmethod = 1;
-					break;
-				}
-			}
-			if(rightmethod == 0)
-			{
-				mesg -> statu = UNKNOW;
-			}
+			readFirstLine(mesg, line);
 		}
 
 		line_start = line_end + 1;
@@ -176,55 +121,19 @@ int httpsread(SSL *ssl, Mesg *mesg)
 
 	free(line);
 
-	//mesg->para[0] = "sdw";
 	if(mesg -> statu != GET)  //only support get method
 	{
 		mesg -> statu = UNKNOW;
 	}
-	//else {
-	//	char* para_pos = index(mesg->path, '?');
-	//	if(para_pos != NULL)
-	//		*para_pos = '\0';
-	//	char  **ptolast = mesg -> para;
-	//	int cnt = 0;
-	//	ptolast++;
-	//	while(para_pos != NULL)
-	//	{
-	//		char *start = para_pos + 1;
-	//		para_pos = index(start, '&');
-	//		if(para_pos != NULL)
-	//			*para_pos = '\0';
-	//		int len = strlen(start) + 1;
-	//		if(len > PARASIZE)
-	//		{
-	//			fprintf(stderr, "para is too long\n");
-	//			len = PARASIZE;
-	//		}
-	//		
-	//		*ptolast = malloc(sizeof(char)*len);
-	//		strncpy(*ptolast, start, len);
-	//		//printf("para: %s len: %d\n", start, len);
-	//		(*ptolast)[len-1] = '\0';
-
-	//		ptolast++;
-	//		cnt++;
-	//		if(cnt == PARANUM-1)
-	//		{
-	//			break;
-	//		}
-	//		//printf("%s %s \n", (mesg->para)[1], (mesg->para)[2]);
-	//	}
-	//	*ptolast = NULL;
-	//}
 	return 0;
 }
 
-int httpssend(SSL *ssl, const Mesg *mesg)
+int httpsSend(SSL *ssl, const Mesg *mesg)
 {
 	if(mesg -> statu == UNKNOW)
 	{
 		char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>NO THIS METHOD! </h1>"; 
-		SSL_write(ssl, ret, strlen(ret)/sizeof(char));
+		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
 		return -1;
 	}
 	const char *path = mesg -> path;
@@ -234,7 +143,7 @@ int httpssend(SSL *ssl, const Mesg *mesg)
 		if(errno == ENOENT)
 		{
 			char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>404 NOT FOUND! </h1>"; 
-			SSL_write(ssl, ret, strlen(ret)/sizeof(char));
+			SSL_write(ssl, ret, strlen(ret)*sizeof(char));
 			return -1;
 		} else {
 			perror("open()");
@@ -247,62 +156,166 @@ int httpssend(SSL *ssl, const Mesg *mesg)
 	if(!S_ISREG(file_stat.st_mode))
 	{
 		char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>404 NOT FOUND! </h1>"; 
-		SSL_write(ssl, ret, strlen(ret)/sizeof(char));
+		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
 		close(file);
 		return -1;
 	}
 
 	char* ret = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
-	SSL_write(ssl, ret, strlen(ret)/sizeof(char));
+	SSL_write(ssl, ret, strlen(ret)*sizeof(char));
 
-	//if(mesg -> isSdw)
-	//{
-	//	pid_t pid = fork();
-	//	if(pid < 0)
-	//	{
-	//		perror("fork()");
-	//		close(file);
-	//		return -1;
-	//	}
-	//	else if(pid > 0)
-	//	{
-	//		wait(NULL);
-	//	}
-	//	else
-	//	{
-	//		dup2(sd, 1);
-	//		fexecve(file, mesg -> para, environ); 
-	//	}
-
-
-	//} else 
+	char buf[1024];
+	while(1)
 	{
-		char buf[1024];
-		while(1)
+		int nread;
+		nread = read(file, buf, 1024);
+		if(nread < 0)
 		{
-			int nread;
-			nread = read(file, buf, 1024);
-			if(nread < 0)
-			{
-				perror("read()");
-				close(file);
-				break;
-			}
-			if(nread == 0)
-			{
-				close(file);
-				break;
-			}
-			SSL_write(ssl, buf, nread);
+			perror("read()");
+			close(file);
+			break;
 		}
+		if(nread == 0)
+		{
+			close(file);
+			break;
+		}
+		SSL_write(ssl, buf, nread);
 	}
-
-	//printf("sended!!!\n");
 	
 	return 0;
 }
 
-int setsocket(int *psd)
+int http(int sd)
+{
+	Mesg *mesg = malloc(sizeof(Mesg));
+	mesg->para[0] = NULL;
+
+	if(httpRead(sd, mesg) < 0)
+	{
+		fprintf(stderr, "There is a error request in http\n");
+		freeMesg(mesg);
+		return -1;
+	}
+
+	if(httpSend(sd, mesg) < 0)
+	{
+		fprintf(stderr, "There is an error when send\n");
+		freeMesg(mesg);
+		return -1;
+	}
+	freeMesg(mesg);
+	return 0;
+}
+
+int httpRead(int sd, Mesg *mesg)
+{
+	FILE *recv;
+	int recvfd = dup(sd);
+	recv = fdopen(recvfd, "r");
+	
+	char *line;
+	size_t len = 0;
+	ssize_t nread;
+	strcpy(mesg->path, ROOTPATH);
+
+	int cnt = 0;
+	while(1)
+	{
+		nread = getline(&line, &len, recv);
+		if(nread < 0)
+		{
+			fclose(recv);
+			free(line);
+			perror("getlien()");
+			return -1;
+		}
+		fputs(line, stdout);
+		if(strcmp(line, "\r\n") == 0)
+			break;
+
+		if(cnt == 0)
+		{
+			readFirstLine(mesg, line);
+		}
+		cnt++;
+	}
+	fclose(recv);
+	free(line);
+
+	if(mesg -> statu != GET)  //only support get method
+		mesg -> statu = UNKNOW;
+	return 0;
+}
+
+int httpSend(int sd, const Mesg *mesg)
+{
+	if(mesg -> statu == UNKNOW)
+	{
+		char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>NO THIS METHOD! </h1>"; 
+		send(sd, ret, strlen(ret)*sizeof(char), 0);
+		return -1;
+	}
+
+	const char *path = mesg -> path;
+	if(deny_http) {
+		char *ret = "HTTP/1.1 301 MOVED PERMANENTLY\r\nLocation: https://127.0.0.1"; 
+		send(sd, ret, strlen(ret)*sizeof(char), 0);
+		send(sd, mesg->url_path, strlen(mesg->url_path)*sizeof(char), 0);
+		send(sd, "\r\n\r\n", 4*sizeof(char), 0);
+		return 0;
+	}
+
+	int file = open(path, O_RDONLY);
+	if(file < 0)
+	{
+		if(errno == ENOENT)
+		{
+			char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>404 NOT FOUND! </h1>"; 
+			send(sd, ret, strlen(ret)*sizeof(char), 0);
+			return -1;
+		} else {
+			perror("open()");
+			return -1;
+		}
+	}
+
+	struct stat file_stat;
+	fstat(file, &file_stat);
+	if(!S_ISREG(file_stat.st_mode))
+	{
+		char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>404 NOT FOUND! </h1>"; 
+		send(sd, ret, strlen(ret)*sizeof(char), 0);
+		close(file);
+		return -1;
+	}
+
+	char* ret = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
+	send(sd, ret, strlen(ret)*sizeof(char), 0);
+
+	char buf[1024];
+	while(1)
+	{
+		int nread;
+		nread = read(file, buf, 1024);
+		if(nread < 0)
+		{
+			perror("read()");
+			close(file);
+			break;
+		}
+		if(nread == 0)
+		{
+			close(file);
+			break;
+		}
+		send(sd, buf, nread, 0);
+	}
+	
+	return 0;
+}
+
+int setSocket(int *psd, int port)
 {
 	struct sockaddr_in laddr;
 	int sd;
@@ -323,7 +336,7 @@ int setsocket(int *psd)
 	}
 
 	laddr.sin_family = AF_INET;
-	laddr.sin_port = htons(PORT);
+	laddr.sin_port = htons(port);
 	inet_pton(AF_INET, "0.0.0.0", &laddr.sin_addr);
 
 	if(bind(sd, (void *)&laddr, sizeof(laddr)) < 0)
@@ -353,7 +366,7 @@ int isRoot()
 	}
 }
 
-SSL_CTX* InitServerCTX(void)
+SSL_CTX* initServerCTX(void)
 {
 	const SSL_METHOD *method;
 	SSL_CTX *ctx;
@@ -369,16 +382,16 @@ SSL_CTX* InitServerCTX(void)
 	return ctx;
 }
 
-void LoadCertificates(SSL_CTX* ctx, char* CertFile, char* KeyFile)
+void loadCertificates(SSL_CTX* ctx, char* cert_file, char* key_file)
 {
-	/* set the local certificate from CertFile */
-	if ( SSL_CTX_use_certificate_file(ctx, CertFile, SSL_FILETYPE_PEM) <= 0 )
+	/* set the local certificate from cert_file */
+	if ( SSL_CTX_use_certificate_file(ctx, cert_file, SSL_FILETYPE_PEM) <= 0 )
 	{
 		ERR_print_errors_fp(stderr);
 		abort();
 	}
-	/* set the private key from KeyFile (may be the same as CertFile) */
-	if ( SSL_CTX_use_PrivateKey_file(ctx, KeyFile, SSL_FILETYPE_PEM) <= 0 )
+	/* set the private key from key_file (may be the same as cert_file) */
+	if ( SSL_CTX_use_PrivateKey_file(ctx, key_file, SSL_FILETYPE_PEM) <= 0 )
 	{
 		ERR_print_errors_fp(stderr);
 		abort();
@@ -391,7 +404,7 @@ void LoadCertificates(SSL_CTX* ctx, char* CertFile, char* KeyFile)
 	}
 }
 
-void ShowCerts(SSL* ssl)
+void showCerts(SSL* ssl)
 {
 	X509 *cert;
 	char *line;
@@ -411,45 +424,117 @@ void ShowCerts(SSL* ssl)
 		printf("No certificates.\n");
 }
 
-void Servlet(SSL* ssl) /* Serve the connection -- threadable */
+void* httpServer(void *arg)
 {
-	char buf[1024] = {0};
-	int sd, bytes;
-	const char* ServerResponse="<\\Body>\
-								<Name>aticleworld.com</Name>\
-								<year>1.5</year>\
-								<BlogType>Embedede and c\\c++<\\BlogType>\
-								<Author>amlendra<Author>\
-								<\\Body>";
-	const char *cpValidMessage = "<Body>\
-								  <UserName>aticle<UserName>\
-								  <Password>123<Password>\
-								  <\\Body>";
-	if ( SSL_accept(ssl) == -1 )     /* do SSL-protocol accept */
-		ERR_print_errors_fp(stderr);
-	else
+	int sd;
+	if(setSocket(&sd, HTTP_PORT) < 0)
 	{
-		ShowCerts(ssl);        /* get any certificates */
-		bytes = SSL_read(ssl, buf, sizeof(buf)); /* get request */
-		buf[bytes] = '\0';
-		printf("Client msg: \"%s\"\n", buf);
-		if ( bytes > 0 )
+		perror("setsocket()");
+		pthread_exit(NULL);
+	}
+
+	struct sockaddr_in raddr;
+	socklen_t raddr_len = sizeof(raddr);
+
+	while(1)
+	{
+		int rvsd = accept(sd, (void *)&raddr, &raddr_len); 
+		if(rvsd < 0)
 		{
-			if(strcmp(cpValidMessage,buf) == 0)
-			{
-				SSL_write(ssl, ServerResponse, strlen(ServerResponse)); /* send reply */
-			}
-			else
-			{
-				SSL_write(ssl, "Invalid Message", strlen("Invalid Message")); /* send reply */
-			}
+			perror("accept()");
+			close(sd);
+			pthread_exit(NULL);
 		}
-		else
+
+		char ipstr[IPSTRSIZE];
+		inet_ntop(AF_INET, &raddr.sin_addr, ipstr, IPSTRSIZE);
+		printf("Client:%s:%d\n", ipstr, ntohs(raddr.sin_port));
+
+		http(rvsd);
+
+		if(close(rvsd) < 0)
 		{
-			ERR_print_errors_fp(stderr);
+			perror("close()");
+			close(sd);
+			pthread_exit(NULL);
 		}
 	}
-	sd = SSL_get_fd(ssl);       /* get socket connection */
-	SSL_free(ssl);         /* release SSL state */
-	close(sd);          /* close connection */
+	close(sd);
+	pthread_exit(NULL);
+}
+
+void* httpsServer(void *arg)
+{
+	int sd;
+	SSL_CTX *ctx;
+
+	SSL_library_init();
+	ctx = initServerCTX();
+	loadCertificates(ctx, "mycert.pem", "mycert.pem");
+	
+	if(setSocket(&sd, HTTPS_PORT) < 0)
+	{
+		perror("setsocket()");
+		pthread_exit(NULL);
+	}
+
+	struct sockaddr_in raddr;
+	socklen_t raddr_len = sizeof(raddr);
+	SSL *ssl;
+
+	while(1)
+	{
+		int rvsd = accept(sd, (void *)&raddr, &raddr_len); 
+		if(rvsd < 0)
+		{
+			perror("accept()");
+			close(sd);
+			pthread_exit(NULL);
+		}
+
+		char ipstr[IPSTRSIZE];
+		inet_ntop(AF_INET, &raddr.sin_addr, ipstr, IPSTRSIZE);
+		printf("Client:%s:%d\n", ipstr, ntohs(raddr.sin_port));
+
+		ssl = SSL_new(ctx);
+		SSL_set_fd(ssl, rvsd);
+
+		//http(rvsd);
+		https(ssl);
+
+		SSL_free(ssl);
+		if(close(rvsd) < 0)
+		{
+			perror("close()");
+			close(sd);
+			pthread_exit(NULL);
+		}
+	}
+	close(sd);
+	pthread_exit(NULL);
+}
+
+int readFirstLine(Mesg *mesg, char *line)
+{
+	int rightmethod = 0;
+	for(int i = 0; ReqMethod[i] != NULL; i++)
+	{
+		//fputs(ReqMethod[i],stdout);
+		if(strncmp(line, ReqMethod[i], strlen(ReqMethod[i])) == 0)
+		{
+			mesg -> statu = i;
+			char* path_start = index(line, ' ')+1;
+			char* path_end = rindex(line, ' ');
+			strncat(mesg->path, path_start, path_end-path_start);
+			strncpy(mesg->url_path, path_start, path_end-path_start);
+			(mesg->url_path)[path_end-path_start] = '\0';
+			rightmethod = 1;
+			break;
+		}
+	}
+	if(rightmethod == 0)
+	{
+		mesg -> statu = UNKNOW;
+	}
+	return 0;
 }

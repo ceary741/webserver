@@ -3,7 +3,8 @@
 
 #define ROOTPATH "/home/ceary/webserver/www"
 #define SDWPATH "/sdw/"
-#define PORT 443
+#define HTTP_PORT 80
+#define HTTPS_PORT 443
 
 #define IPSTRSIZE 64
 #define PARASIZE 64
@@ -25,26 +26,32 @@ typedef
 struct Mesg{
 	Status statu;
 	char path[PATHSIZE];
+	char url_path[PATHSIZE];
 	char *para[PARANUM];
 	uint32_t ip;
 	uint16_t port;
-	int isSdw;
 }Mesg;
 
-int setsocket(int *sd);
-void freemesg(Mesg *mesg);
+int setSocket(int *sd, int port);
+void freeMesg(Mesg *mesg);
+int readFirstLine(Mesg *mesg, char *line);
 
 int https(SSL *ssl);
+int httpsRead(SSL *ssl, Mesg *mesg);
+int httpsSend(SSL *ssl, const Mesg *mesg);
 
-int httpsread(SSL *ssl, Mesg *mesg);
-int httpssend(SSL *ssl, const Mesg *mesg);
+int http(int sd);
+int httpRead(int sd, Mesg *mesg);
+int httpSend(int sd, const Mesg *mesg);
 
-int OpenListener(int port);
+int openListener(int port);
 int isRoot();
-SSL_CTX* InitServerCTX(void);
-void LoadCertificates(SSL_CTX* ctx, char* CertFile, char* KeyFile);
-void ShowCerts(SSL* ssl);
-void Servlet(SSL* ssl); /* Serve the connection -- threadable */
+SSL_CTX* initServerCTX(void);
+void loadCertificates(SSL_CTX* ctx, char* cert_file, char* key_file);
+void showCerts(SSL* ssl);
+
+void* httpServer(void* arg);
+void* httpsServer(void* arg);
 
 #endif
 
