@@ -3,12 +3,13 @@
 
 #define ROOTPATH "/home/ceary/webserver/www"
 #define SDWPATH "/sdw/"
-#define PORT 80
+#define PORT 443
 
 #define IPSTRSIZE 64
 #define PARASIZE 64
 #define PATHSIZE 256
 #define PARANUM 16
+#define BUFSIZE 1024
 
 extern char **environ;
 
@@ -33,11 +34,17 @@ struct Mesg{
 int setsocket(int *sd);
 void freemesg(Mesg *mesg);
 
-int http(int sd);
+int https(SSL *ssl);
 
-int httpread(int sd, Mesg *mesg);
-int httpsend(int sd, const Mesg *mesg);
+int httpsread(SSL *ssl, Mesg *mesg);
+int httpssend(SSL *ssl, const Mesg *mesg);
 
+int OpenListener(int port);
+int isRoot();
+SSL_CTX* InitServerCTX(void);
+void LoadCertificates(SSL_CTX* ctx, char* CertFile, char* KeyFile);
+void ShowCerts(SSL* ssl);
+void Servlet(SSL* ssl); /* Serve the connection -- threadable */
 
 #endif
 
