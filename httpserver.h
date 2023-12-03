@@ -1,7 +1,7 @@
 #ifndef _HTTPSERVER__H__
 #define _HTTPSERVER__H__
 
-#define ROOTPATH "/Users/ceary/webserver/webserver/www"
+#define ROOTPATH "/home/ceary/webserver/www"
 #define SDWPATH "/sdw/"
 #define HTTP_PORT 80
 #define HTTPS_PORT 443
@@ -12,7 +12,7 @@
 #define PARANUM 16
 #define BUFSIZE 1024
 
-#define HEADER_RANGE 1
+#define HEADER_RANGE 0
 
 extern char **environ;
 
@@ -39,6 +39,7 @@ struct Mesg{
 int setSocket(int *sd, int port);
 void freeMesg(Mesg *mesg);
 int readFirstLine(Mesg *mesg, char *line);
+int readHeaders(Mesg *mesg, char *line);
 
 int https(SSL *ssl);
 int httpsRead(SSL *ssl, Mesg *mesg);

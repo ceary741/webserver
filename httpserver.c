@@ -53,6 +53,8 @@ int https(SSL *ssl)
 {
 	Mesg *mesg = malloc(sizeof(Mesg));
 	mesg->para[0] = NULL;
+	mesg->range_start = 0;
+	mesg->range_end = 0;
 
 	if(httpsRead(ssl, mesg) < 0)
 	{
@@ -112,7 +114,7 @@ int httpsRead(SSL *ssl, Mesg *mesg)
 		line_end = index(line_start, '\n');
 		strncpy(line, line_start, line_end-line_start+1);
 		line[line_end-line_start+1] = '\0';
-		fputs(line, stdout);
+		//fputs(line, stdout);
 		if(strcmp(line, "\r\n") == 0)
 			break;
 
@@ -122,7 +124,11 @@ int httpsRead(SSL *ssl, Mesg *mesg)
 		}
 		else
 		{
-			readHeaders(mesg, line);
+			if(readHeaders(mesg, line) != 0)
+			{
+				free(line);
+				return -1;
+			}
 		}
 
 		line_start = line_end + 1;
@@ -171,22 +177,46 @@ int httpsSend(SSL *ssl, const Mesg *mesg)
 		return -1;
 	}
 
-	char* ret = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
-	SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+	if(mesg->range_start == 0 && mesg->range_end == 0)
+	{
+		char* ret = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
+		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+	} else 
+	{
+		char* ret = "HTTP/1.1 206 Partial Content\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
+		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+	}
+
+	uint64_t range_start = mesg->range_start;
+	uint64_t range_end = mesg->range_end;
+	off_t len = lseek(file, 0, SEEK_END);
+	if(range_end == 0)
+	{
+		range_end = len-1;
+	}
+	if(len <= range_end || range_start > range_end)
+	{
+		fprintf(stderr, "range in header is invalid!\n");
+		return -1;
+	}
+	lseek(file, range_start, SEEK_SET);
 
 	char buf[1024];
 	while(1)
 	{
 		int nread;
-		nread = read(file, buf, 1024);
-		if(nread < 0)
+		int nread_w = range_end+1 - lseek(file, 0, SEEK_CUR);
+		if(nread_w > 1024)
+			nread_w = 1024;
+		if(nread_w == 0)
 		{
-			perror("read()");
 			close(file);
 			break;
 		}
-		if(nread == 0)
+		nread = read(file, buf, nread_w);
+		if(nread < 0)
 		{
+			perror("read()");
 			close(file);
 			break;
 		}
@@ -200,6 +230,8 @@ int http(int sd)
 {
 	Mesg *mesg = malloc(sizeof(Mesg));
 	mesg->para[0] = NULL;
+	mesg->range_start = 0;
+	mesg->range_end = 0;
 
 	if(httpRead(sd, mesg) < 0)
 	{
@@ -240,7 +272,7 @@ int httpRead(int sd, Mesg *mesg)
 			perror("getlien()");
 			return -1;
 		}
-		fputs(line, stdout);
+		//fputs(line, stdout);
 		if(strcmp(line, "\r\n") == 0)
 			break;
 
@@ -531,6 +563,7 @@ void* httpsServer(void *arg)
 int readFirstLine(Mesg *mesg, char *line)
 {
 	int rightmethod = 0;
+	fputs(line, stdout);
 	for(int i = 0; ReqMethod[i] != NULL; i++)
 	{
 		//fputs(ReqMethod[i],stdout);
@@ -560,7 +593,21 @@ int readHeaders(Mesg *mesg, char *line)
 		//fputs(ReqMethod[i],stdout);
 		if(strncmp(line, HeaderPara[i], strlen(HeaderPara[i])) == 0)
 		{
-			if(i == HEADER_RANGE)
+			fputs(line, stdout);
+			if(i == HEADER_RANGE){
+				char *start_pos = index(line, '=')+1;
+				char *end_pos = index(line, '-')+1;
+				mesg->range_start = atoi(start_pos);
+				if(mesg->range_start < 0)
+					mesg->range_start = 0;
+				mesg->range_end = atoi(end_pos);
+				if(mesg->range_end != 0 && mesg->range_end <= mesg->range_start)
+				{
+					fprintf(stderr, "range in header is invalid!\n");
+					return -1;
+				}
+			}
 		}
 	}
+	return 0;
 }
