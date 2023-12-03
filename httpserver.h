@@ -12,6 +12,8 @@
 #define PARANUM 16
 #define BUFSIZE 1024
 
+#define HEADER_RANGE 1
+
 extern char **environ;
 
 typedef
@@ -30,6 +32,8 @@ struct Mesg{
 	char *para[PARANUM];
 	uint32_t ip;
 	uint16_t port;
+	uint64_t range_start;
+	uint64_t range_end;
 }Mesg;
 
 int setSocket(int *sd, int port);

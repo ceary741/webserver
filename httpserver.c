@@ -24,6 +24,12 @@ char const *ReqMethod[] =
 	NULL
 };
 
+char const *HeaderPara[] = 
+{
+	"Range:",
+	NULL
+};
+
 int deny_http = 1;
 
 int main(void)
@@ -113,6 +119,10 @@ int httpsRead(SSL *ssl, Mesg *mesg)
 		if(cnt == 0)
 		{
 			readFirstLine(mesg, line);
+		}
+		else
+		{
+			readHeaders(mesg, line);
 		}
 
 		line_start = line_end + 1;
@@ -237,6 +247,10 @@ int httpRead(int sd, Mesg *mesg)
 		if(cnt == 0)
 		{
 			readFirstLine(mesg, line);
+		}
+		else
+		{
+			readHeaders(mesg, line);
 		}
 		cnt++;
 	}
@@ -537,4 +551,16 @@ int readFirstLine(Mesg *mesg, char *line)
 		mesg -> statu = UNKNOW;
 	}
 	return 0;
+}
+
+int readHeaders(Mesg *mesg, char *line)
+{
+	for(int i = 0; HeaderPara[i] != NULL; i++)
+	{
+		//fputs(ReqMethod[i],stdout);
+		if(strncmp(line, HeaderPara[i], strlen(HeaderPara[i])) == 0)
+		{
+			if(i == HEADER_RANGE)
+		}
+	}
 }
