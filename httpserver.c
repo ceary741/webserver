@@ -16,6 +16,9 @@
 
 #include "httpserver.h"
 
+const char *type_mp4 = "video/mp4";
+const char *type_html = "text/html";
+
 char const *ReqMethod[] = 
 {
 	[GET]	"GET",
@@ -177,15 +180,28 @@ int httpsSend(SSL *ssl, const Mesg *mesg)
 		return -1;
 	}
 
+	char *content_type = type_html;
+	char *dot_pos = rindex(mesg->path, '.');
+	if(strncmp("mp4", dot_pos+1, strlen("mp4")) == 0)
+	{
+		content_type = type_mp4;
+	}
+
 	if(mesg->range_start == 0 && mesg->range_end == 0)
 	{
-		char* ret = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
+		char *ret = malloc(BUFSIZE);
+		sprintf(ret, "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nConnection: close\r\n\r\n", content_type);
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+		free(ret);
 	} else 
 	{
-		char* ret = "HTTP/1.1 206 Partial Content\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
+		char *ret = malloc(BUFSIZE);
+		sprintf(ret, "HTTP/1.1 206 Partial Content\r\nContent-Type: %s\r\nConnection: close\r\n\r\n", content_type);
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+		free(ret);
 	}
+
+	printf("==================\n");
 
 	uint64_t range_start = mesg->range_start;
 	uint64_t range_end = mesg->range_end;
@@ -200,6 +216,7 @@ int httpsSend(SSL *ssl, const Mesg *mesg)
 		return -1;
 	}
 	lseek(file, range_start, SEEK_SET);
+	printf("==================\n");
 
 	char buf[1024];
 	while(1)
@@ -223,6 +240,7 @@ int httpsSend(SSL *ssl, const Mesg *mesg)
 		SSL_write(ssl, buf, nread);
 	}
 	
+	printf("==================\n");
 	return 0;
 }
 
