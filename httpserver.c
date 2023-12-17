@@ -35,8 +35,6 @@ char const *HeaderPara[] =
 	NULL
 };
 
-int deny_http = 1;
-
 int main(void)
 {
 	pthread_t pid_http, pid_https;
@@ -57,52 +55,31 @@ int main(void)
 int https(SSL *ssl)
 {
 	Mesg *mesg = malloc(sizeof(Mesg));
-	mesg->para[0] = NULL;
 	mesg->range_start = 0;
 	mesg->range_end = 0;
 	mesg->ret_data = 1;
 	mesg->ret_length = 0;
 
-#ifdef DEBUG
-	printf("before read==================\n");
-#endif
 	if(httpsRead(ssl, mesg) < 0)
 	{
 		fprintf(stderr, "There is a error request\n");
 		freeMesg(mesg);
 		return -1;
 	}
-#ifdef DEBUG
-	printf("last read==================\n");
-#endif
 
-#ifdef DEBUG
-	printf("before send==================\n");
-#endif
 	if(httpsSend(ssl, mesg) < 0)
 	{
 		fprintf(stderr, "There is an error when send\n");
 		freeMesg(mesg);
 		return -1;
 	}
-#ifdef DEBUG
-	printf("last send==================\n");
-#endif
 	freeMesg(mesg);
 	return 0;
 }
 
 void freeMesg(Mesg *mesg)
 {
-	int i;
-	for(i = 0; i < PARANUM; i++)
-	{
-		if(mesg->para[i] == NULL)
-			break;
-		free(mesg->para[i]);
-	}
 	free(mesg);
-
 	return;
 }
 
@@ -133,9 +110,6 @@ int httpsRead(SSL *ssl, Mesg *mesg)
 		line_end = index(line_start, '\n');
 		strncpy(line, line_start, line_end-line_start+1);
 		line[line_end-line_start+1] = '\0';
-#ifdef DEBUG
-		fputs(line, stdout);
-#endif
 		if(strcmp(line, "\r\n") == 0)
 			break;
 
@@ -285,7 +259,6 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 int http(int sd)
 {
 	Mesg *mesg = malloc(sizeof(Mesg));
-	mesg->para[0] = NULL;
 	mesg->range_start = 0;
 	mesg->range_end = 0;
 	mesg->ret_data = 1;
@@ -361,61 +334,10 @@ int httpSend(int sd, Mesg *mesg)
 		return -1;
 	}
 
-	const char *path = mesg -> path;
-	if(deny_http) {
-		char *ret = "HTTP/1.1 301 MOVED PERMANENTLY\r\nLocation: https://127.0.0.1"; 
-		send(sd, ret, strlen(ret)*sizeof(char), 0);
-		send(sd, mesg->url_path, strlen(mesg->url_path)*sizeof(char), 0);
-		send(sd, "\r\n\r\n", 4*sizeof(char), 0);
-		return 0;
-	}
-
-	int file = open(path, O_RDONLY);
-	if(file < 0)
-	{
-		if(errno == ENOENT)
-		{
-			char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>404 NOT FOUND! </h1>"; 
-			send(sd, ret, strlen(ret)*sizeof(char), 0);
-			return -1;
-		} else {
-			perror("open()");
-			return -1;
-		}
-	}
-
-	struct stat file_stat;
-	fstat(file, &file_stat);
-	if(!S_ISREG(file_stat.st_mode))
-	{
-		char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>404 NOT FOUND! </h1>"; 
-		send(sd, ret, strlen(ret)*sizeof(char), 0);
-		close(file);
-		return -1;
-	}
-
-	char* ret = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n";
+	char *ret = "HTTP/1.1 301 MOVED PERMANENTLY\r\nLocation: https://127.0.0.1"; 
 	send(sd, ret, strlen(ret)*sizeof(char), 0);
-
-	char buf[1024];
-	while(1)
-	{
-		int nread;
-		nread = read(file, buf, 1024);
-		if(nread < 0)
-		{
-			perror("read()");
-			close(file);
-			break;
-		}
-		if(nread == 0)
-		{
-			close(file);
-			break;
-		}
-		send(sd, buf, nread, 0);
-	}
-	
+	send(sd, mesg->url_path, strlen(mesg->url_path)*sizeof(char), 0);
+	send(sd, "\r\n\r\n", 4*sizeof(char), 0);
 	return 0;
 }
 
@@ -604,13 +526,7 @@ void* httpsServer(void *arg)
 		SSL_set_fd(ssl, rvsd);
 
 		//http(rvsd);
-#ifdef DEBUG
-		printf("before https==================\n");
-#endif
 		https(ssl);
-#ifdef DEBUG
-		printf("last https==================\n");
-#endif
 
 		SSL_free(ssl);
 		if(close(rvsd) < 0)
@@ -676,9 +592,6 @@ int readHeaders(Mesg *mesg, char *line)
 				char *start_pos = index(line, ':')+1;
 				strncpy(buf, start_pos, BUFSIZE);
 				char *trim_buf = trim(buf);
-#ifdef DEBUG
-				printf("==%s\n", trim_buf);
-#endif
 				if(strncmp(trim_buf, "document", strlen(trim_buf)) == 0) {
 					mesg->ret_length = 1;
 					mesg->ret_document = 1;

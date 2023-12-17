@@ -31,7 +31,6 @@ struct Mesg{
 	Status statu;
 	char path[PATHSIZE];
 	char url_path[PATHSIZE];
-	char *para[PARANUM];
 	uint32_t ip;
 	uint16_t port;
 	uint64_t range_start;
