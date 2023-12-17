@@ -14,6 +14,7 @@
 #define BUFSIZE 1024
 
 #define HEADER_RANGE 0
+#define HEADER_SEC_FETCH_DEST 1
 
 extern char **environ;
 
@@ -35,6 +36,9 @@ struct Mesg{
 	uint16_t port;
 	uint64_t range_start;
 	uint64_t range_end;
+	int ret_data;
+	int ret_document;
+	int ret_length;
 }Mesg;
 
 int setSocket(int *sd, int port);
@@ -44,11 +48,11 @@ int readHeaders(Mesg *mesg, char *line);
 
 int https(SSL *ssl);
 int httpsRead(SSL *ssl, Mesg *mesg);
-int httpsSend(SSL *ssl, const Mesg *mesg);
+int httpsSend(SSL *ssl, Mesg *mesg);
 
 int http(int sd);
 int httpRead(int sd, Mesg *mesg);
-int httpSend(int sd, const Mesg *mesg);
+int httpSend(int sd, Mesg *mesg);
 
 int openListener(int port);
 int isRoot();
@@ -58,6 +62,8 @@ void showCerts(SSL* ssl);
 
 void* httpServer(void* arg);
 void* httpsServer(void* arg);
+
+char* trim(char *str);
 
 #endif
 

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <ctype.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -30,6 +31,7 @@ char const *ReqMethod[] =
 char const *HeaderPara[] = 
 {
 	"Range:",
+	"Sec-Fetch-Dest:",
 	NULL
 };
 
@@ -58,20 +60,34 @@ int https(SSL *ssl)
 	mesg->para[0] = NULL;
 	mesg->range_start = 0;
 	mesg->range_end = 0;
+	mesg->ret_data = 1;
+	mesg->ret_length = 0;
 
+#ifdef DEBUG
+	printf("before read==================\n");
+#endif
 	if(httpsRead(ssl, mesg) < 0)
 	{
 		fprintf(stderr, "There is a error request\n");
 		freeMesg(mesg);
 		return -1;
 	}
+#ifdef DEBUG
+	printf("last read==================\n");
+#endif
 
+#ifdef DEBUG
+	printf("before send==================\n");
+#endif
 	if(httpsSend(ssl, mesg) < 0)
 	{
 		fprintf(stderr, "There is an error when send\n");
 		freeMesg(mesg);
 		return -1;
 	}
+#ifdef DEBUG
+	printf("last send==================\n");
+#endif
 	freeMesg(mesg);
 	return 0;
 }
@@ -117,7 +133,9 @@ int httpsRead(SSL *ssl, Mesg *mesg)
 		line_end = index(line_start, '\n');
 		strncpy(line, line_start, line_end-line_start+1);
 		line[line_end-line_start+1] = '\0';
-		//fputs(line, stdout);
+#ifdef DEBUG
+		fputs(line, stdout);
+#endif
 		if(strcmp(line, "\r\n") == 0)
 			break;
 
@@ -147,7 +165,7 @@ int httpsRead(SSL *ssl, Mesg *mesg)
 	return 0;
 }
 
-int httpsSend(SSL *ssl, const Mesg *mesg)
+int httpsSend(SSL *ssl, Mesg *mesg)
 {
 	if(mesg -> statu == UNKNOW)
 	{
@@ -185,23 +203,11 @@ int httpsSend(SSL *ssl, const Mesg *mesg)
 	if(strncmp("mp4", dot_pos+1, strlen("mp4")) == 0)
 	{
 		content_type = type_mp4;
+		if(mesg->ret_document)
+		{
+			mesg->ret_data = 0;
+		}
 	}
-
-	if(mesg->range_start == 0 && mesg->range_end == 0)
-	{
-		char *ret = malloc(BUFSIZE);
-		sprintf(ret, "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nConnection: close\r\n\r\n", content_type);
-		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
-		free(ret);
-	} else 
-	{
-		char *ret = malloc(BUFSIZE);
-		sprintf(ret, "HTTP/1.1 206 Partial Content\r\nContent-Type: %s\r\nConnection: close\r\n\r\n", content_type);
-		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
-		free(ret);
-	}
-
-	printf("==================\n");
 
 	uint64_t range_start = mesg->range_start;
 	uint64_t range_end = mesg->range_end;
@@ -216,8 +222,37 @@ int httpsSend(SSL *ssl, const Mesg *mesg)
 		return -1;
 	}
 	lseek(file, range_start, SEEK_SET);
-	printf("==================\n");
 
+	if(mesg->range_start == 0 && mesg->range_end == 0)
+	{
+		char *ret = malloc(BUFSIZE);
+		sprintf(ret, "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nConnection: close\r\n", content_type);
+		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+		free(ret);
+	} else 
+	{
+		char *ret = malloc(BUFSIZE);
+		sprintf(ret, "HTTP/1.1 206 Partial Content\r\nContent-Type: %s\r\nConnection: close\r\n", content_type);
+		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+		sprintf(ret, "Content-Range: bytes %lld-%lld/%lld\r\n", mesg->range_start, mesg->range_end, len);
+		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+		sprintf(ret, "Length: %lld\r\n", mesg->range_end - mesg->range_start + 1);
+		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+		free(ret);
+	}
+
+	if(mesg->ret_length)
+	{
+		char *ret = malloc(BUFSIZE);
+		sprintf(ret, "Length: %lld\r\n", len);
+		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+		free(ret);
+	}
+
+	SSL_write(ssl, "\r\n", 2);
+
+	if(mesg->ret_data == 0)
+		return 0;
 	char buf[1024];
 	while(1)
 	{
@@ -237,10 +272,13 @@ int httpsSend(SSL *ssl, const Mesg *mesg)
 			close(file);
 			break;
 		}
-		SSL_write(ssl, buf, nread);
+		int ret = SSL_write(ssl, buf, nread);
+		if(ret <= 0) {
+			printf("ssl have closes\n");
+			return -1;
+		}
 	}
 	
-	printf("==================\n");
 	return 0;
 }
 
@@ -250,6 +288,8 @@ int http(int sd)
 	mesg->para[0] = NULL;
 	mesg->range_start = 0;
 	mesg->range_end = 0;
+	mesg->ret_data = 1;
+	mesg->ret_length = 0;
 
 	if(httpRead(sd, mesg) < 0)
 	{
@@ -312,7 +352,7 @@ int httpRead(int sd, Mesg *mesg)
 	return 0;
 }
 
-int httpSend(int sd, const Mesg *mesg)
+int httpSend(int sd, Mesg *mesg)
 {
 	if(mesg -> statu == UNKNOW)
 	{
@@ -564,7 +604,13 @@ void* httpsServer(void *arg)
 		SSL_set_fd(ssl, rvsd);
 
 		//http(rvsd);
+#ifdef DEBUG
+		printf("before https==================\n");
+#endif
 		https(ssl);
+#ifdef DEBUG
+		printf("last https==================\n");
+#endif
 
 		SSL_free(ssl);
 		if(close(rvsd) < 0)
@@ -625,7 +671,34 @@ int readHeaders(Mesg *mesg, char *line)
 					return -1;
 				}
 			}
-		}
+			else if(i == HEADER_SEC_FETCH_DEST) {
+				char buf[BUFSIZE];
+				char *start_pos = index(line, ':')+1;
+				strncpy(buf, start_pos, BUFSIZE);
+				char *trim_buf = trim(buf);
+#ifdef DEBUG
+				printf("==%s\n", trim_buf);
+#endif
+				if(strncmp(trim_buf, "document", strlen(trim_buf)) == 0) {
+					mesg->ret_length = 1;
+					mesg->ret_document = 1;
+				}
+			}
+		} 
 	}
 	return 0;
+}
+
+char* trim(char *str) {
+    char *end;
+    while(isspace((unsigned char)*str)) str++;
+
+    if(*str == 0)
+        return NULL;
+
+    end = str + strlen(str) - 1;
+    while(end > str && isspace((unsigned char)*end)) end--;
+
+    *(end + 1) = '\0';
+	return str;
 }
