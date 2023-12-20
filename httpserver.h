@@ -1,8 +1,8 @@
 #ifndef _HTTPSERVER__H__
 #define _HTTPSERVER__H__
 
-//#define ROOTPATH "/home/ceary/webserver/www"
-#define ROOTPATH "/Users/ceary/webserver/webserver/www"
+#define ROOTPATH "/home/ceary/webserver/www"
+//#define ROOTPATH "/Users/ceary/webserver/webserver/www"
 #define SDWPATH "/sdw/"
 #define HTTP_PORT 80
 #define HTTPS_PORT 443

@@ -1,9 +1,12 @@
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -48,7 +51,35 @@ int main(void)
 	}
 
 	while(1)
-		pause();
+	{
+		struct timespec ts;
+		int s;
+		if(clock_gettime(CLOCK_REALTIME, &ts) == -1) {
+			perror("clock_gettime()");
+			exit(-1);
+		}
+		ts.tv_sec += 5;
+		s = pthread_timedjoin_np(pid_http, NULL, &ts);
+		if (s == 0) {
+			if(pthread_create(&pid_http, NULL, httpServer, NULL) != 0) {
+				perror("pthread_create()");
+				exit(-1);
+			}
+		}
+
+		if(clock_gettime(CLOCK_REALTIME, &ts) == -1) {
+			perror("clock_gettime()");
+			exit(-1);
+		}
+		ts.tv_sec += 5;
+		s = pthread_timedjoin_np(pid_https, NULL, &ts);
+		if (s == 0) {
+			if(pthread_create(&pid_https, NULL, httpsServer, NULL) != 0) {
+				perror("pthread_create()");
+				exit(-1);
+			}
+		}
+	}
 	return 0;
 }
 
@@ -155,6 +186,7 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 		{
 			char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>404 NOT FOUND! </h1>"; 
 			SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+			fprintf(stderr, "There is no file %s\n", mesg -> path);
 			return -1;
 		} else {
 			perror("open()");
@@ -168,11 +200,12 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 	{
 		char *ret = "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\n\r\n <h1>404 NOT FOUND! </h1>"; 
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
+		fprintf(stderr, "This file %s is diretory\n", mesg -> path);
 		close(file);
 		return -1;
 	}
 
-	char *content_type = type_html;
+	const char *content_type = type_html;
 	char *dot_pos = rindex(mesg->path, '.');
 	if(strncmp("mp4", dot_pos+1, strlen("mp4")) == 0)
 	{
@@ -208,9 +241,9 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 		char *ret = malloc(BUFSIZE);
 		sprintf(ret, "HTTP/1.1 206 Partial Content\r\nContent-Type: %s\r\nConnection: close\r\n", content_type);
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
-		sprintf(ret, "Content-Range: bytes %lld-%lld/%lld\r\n", mesg->range_start, mesg->range_end, len);
+		sprintf(ret, "Content-Range: bytes %ld-%ld/%ld\r\n", mesg->range_start, mesg->range_end, len);
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
-		sprintf(ret, "Length: %lld\r\n", mesg->range_end - mesg->range_start + 1);
+		sprintf(ret, "Length: %ld\r\n", mesg->range_end - mesg->range_start + 1);
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
 		free(ret);
 	}
@@ -218,7 +251,7 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 	if(mesg->ret_length)
 	{
 		char *ret = malloc(BUFSIZE);
-		sprintf(ret, "Length: %lld\r\n", len);
+		sprintf(ret, "Length: %ld\r\n", len);
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
 		free(ret);
 	}
@@ -334,7 +367,7 @@ int httpSend(int sd, Mesg *mesg)
 		return -1;
 	}
 
-	char *ret = "HTTP/1.1 301 MOVED PERMANENTLY\r\nLocation: https://127.0.0.1"; 
+	char *ret = "HTTP/1.1 301 MOVED PERMANENTLY\r\nLocation: https://10.0.0.1"; 
 	send(sd, ret, strlen(ret)*sizeof(char), 0);
 	send(sd, mesg->url_path, strlen(mesg->url_path)*sizeof(char), 0);
 	send(sd, "\r\n\r\n", 4*sizeof(char), 0);
@@ -410,19 +443,16 @@ SSL_CTX* initServerCTX(void)
 
 void loadCertificates(SSL_CTX* ctx, char* cert_file, char* key_file)
 {
-	/* set the local certificate from cert_file */
 	if ( SSL_CTX_use_certificate_file(ctx, cert_file, SSL_FILETYPE_PEM) <= 0 )
 	{
 		ERR_print_errors_fp(stderr);
 		abort();
 	}
-	/* set the private key from key_file (may be the same as cert_file) */
 	if ( SSL_CTX_use_PrivateKey_file(ctx, key_file, SSL_FILETYPE_PEM) <= 0 )
 	{
 		ERR_print_errors_fp(stderr);
 		abort();
 	}
-	/* verify private key */
 	if ( !SSL_CTX_check_private_key(ctx) )
 	{
 		fprintf(stderr, "Private key does not match the public certificate\n");
@@ -496,7 +526,7 @@ void* httpsServer(void *arg)
 
 	SSL_library_init();
 	ctx = initServerCTX();
-	loadCertificates(ctx, "mycert.pem", "mycert.pem");
+	loadCertificates(ctx, "keys/cnlab.cert", "keys/cnlab.prikey");
 	
 	if(setSocket(&sd, HTTPS_PORT) < 0)
 	{
