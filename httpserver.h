@@ -33,8 +33,8 @@ struct Mesg{
 	char url_path[PATHSIZE];
 	uint32_t ip;
 	uint16_t port;
-	uint64_t range_start;
-	uint64_t range_end;
+	int64_t range_start;
+	int64_t range_end;
 	int ret_data;
 	int ret_document;
 	int ret_length;

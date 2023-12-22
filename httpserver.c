@@ -22,6 +22,7 @@
 
 const char *type_mp4 = "video/mp4";
 const char *type_html = "text/html";
+const char *type_unknow = "application/octet-stream";
 
 char const *ReqMethod[] = 
 {
@@ -89,6 +90,7 @@ int https(SSL *ssl)
 	mesg->range_start = 0;
 	mesg->range_end = 0;
 	mesg->ret_data = 1;
+	mesg->ret_document = 0;
 	mesg->ret_length = 0;
 
 	if(httpsRead(ssl, mesg) < 0)
@@ -216,9 +218,21 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 			mesg->ret_data = 0;
 		}
 	}
+	else if(strncmp("html", dot_pos+1, strlen("html")) == 0)
+	{
+		content_type = type_html;
+	}
+	else
+	{
+		content_type = type_unknow;
+		if(mesg->ret_document)
+		{
+			mesg->ret_data = 0;
+		}
+	}
 
-	uint64_t range_start = mesg->range_start;
-	uint64_t range_end = mesg->range_end;
+	int64_t range_start = mesg->range_start;
+	int64_t range_end = mesg->range_end;
 	off_t len = lseek(file, 0, SEEK_END);
 	if(range_end == 0)
 	{
@@ -226,17 +240,16 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 	}
 	if(len <= range_end || range_start > range_end)
 	{
-		fprintf(stderr, "range in header is invalid!\n");
+		fprintf(stderr, "230 range in header is invalid!\n");
 		return -1;
 	}
-	if(range_end - range_start > 1024*1024 && range_end == 0) {
+	if(range_end - range_start > 1024*1024 && mesg->ret_data) {
 		range_end = range_start + 1024*1024;
-		mesg -> range_end = range_end;
 	}
 
 	lseek(file, range_start, SEEK_SET);
 
-	if(mesg->range_start == 0 && mesg->range_end == 0)
+	if(range_start == 0 && range_end == len-1)
 	{
 		char *ret = malloc(BUFSIZE);
 		sprintf(ret, "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nConnection: close\r\n", content_type);
@@ -266,7 +279,9 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 	SSL_write(ssl, "\r\n", 2);
 
 	if(mesg->ret_data == 0)
+	{
 		return 0;
+	}
 	char buf[1024*128];
 	while(1)
 	{
@@ -305,6 +320,7 @@ int http(int sd)
 	mesg->range_start = 0;
 	mesg->range_end = 0;
 	mesg->ret_data = 1;
+	mesg->ret_document = 0;
 	mesg->ret_length = 0;
 
 	if(httpRead(sd, mesg) < 0)
