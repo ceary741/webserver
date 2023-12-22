@@ -93,7 +93,7 @@ int https(SSL *ssl)
 
 	if(httpsRead(ssl, mesg) < 0)
 	{
-		fprintf(stderr, "There is a error request\n");
+		fprintf(stderr, "There is an error when read\n");
 		freeMesg(mesg);
 		return -1;
 	}
@@ -150,6 +150,7 @@ int httpsRead(SSL *ssl, Mesg *mesg)
 		}
 		else
 		{
+			//printf(line);
 			if(readHeaders(mesg, line) != 0)
 			{
 				free(line);
@@ -228,6 +229,11 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 		fprintf(stderr, "range in header is invalid!\n");
 		return -1;
 	}
+	if(range_end - range_start > 1024*1024 && range_end == 0) {
+		range_end = range_start + 1024*1024;
+		mesg -> range_end = range_end;
+	}
+
 	lseek(file, range_start, SEEK_SET);
 
 	if(mesg->range_start == 0 && mesg->range_end == 0)
@@ -241,9 +247,10 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 		char *ret = malloc(BUFSIZE);
 		sprintf(ret, "HTTP/1.1 206 Partial Content\r\nContent-Type: %s\r\nConnection: close\r\n", content_type);
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
-		sprintf(ret, "Content-Range: bytes %ld-%ld/%ld\r\n", mesg->range_start, mesg->range_end, len);
+		sprintf(ret, "Content-Range: bytes %ld-%ld/%ld\r\n", range_start, range_end, len);
+		printf(ret);
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
-		sprintf(ret, "Length: %ld\r\n", mesg->range_end - mesg->range_start + 1);
+		sprintf(ret, "Length: %ld\r\n", range_end - range_start + 1);
 		SSL_write(ssl, ret, strlen(ret)*sizeof(char));
 		free(ret);
 	}
@@ -260,13 +267,13 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 
 	if(mesg->ret_data == 0)
 		return 0;
-	char buf[1024];
+	char buf[1024*128];
 	while(1)
 	{
 		int nread;
 		int nread_w = range_end+1 - lseek(file, 0, SEEK_CUR);
-		if(nread_w > 1024)
-			nread_w = 1024;
+		if(nread_w > 1024*32)
+			nread_w = 1024*32;
 		if(nread_w == 0)
 		{
 			close(file);
@@ -280,11 +287,14 @@ int httpsSend(SSL *ssl, Mesg *mesg)
 			break;
 		}
 		int ret = SSL_write(ssl, buf, nread);
+		printf("=");
+		fflush(stdout);
 		if(ret <= 0) {
-			printf("ssl have closes\n");
+			printf("ssl have closed\n");
 			return -1;
 		}
 	}
+	printf("\n");
 	
 	return 0;
 }
@@ -477,7 +487,9 @@ void showCerts(SSL* ssl)
 		X509_free(cert);
 	}
 	else
-		printf("No certificates.\n");
+	{
+		//printf("No certificates.\n");
+	}
 }
 
 void* httpServer(void *arg)
@@ -548,12 +560,19 @@ void* httpsServer(void *arg)
 			pthread_exit(NULL);
 		}
 
+		struct timeval tv;
+		tv.tv_sec  = 1;
+		tv.tv_usec = 0;
+		setsockopt(rvsd, SOL_SOCKET, SO_SNDTIMEO, (char*)&tv, sizeof(struct timeval));
+
 		char ipstr[IPSTRSIZE];
 		inet_ntop(AF_INET, &raddr.sin_addr, ipstr, IPSTRSIZE);
 		printf("Client:%s:%d\n", ipstr, ntohs(raddr.sin_port));
 
 		ssl = SSL_new(ctx);
 		SSL_set_fd(ssl, rvsd);
+
+		//SSL_set_connect_state(ssl);
 
 		//http(rvsd);
 		https(ssl);
